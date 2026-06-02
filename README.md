@@ -1,112 +1,58 @@
-# Explainer for the TODO API
+# Explainer for the Incognito Static Storage Quota
 
-**Instructions for the explainer author: Search for "todo" in this repository and update all the
-instances as appropriate. For the instances in `index.bs`, update the repository name, but you can
-leave the rest until you start the specification. Then delete the TODOs and this block of text.**
-
-This proposal is an early design sketch by [TODO: team] to describe the problem below and solicit
+This proposal is a design sketch by the Chrome Privacy team to describe the problem of quota-based Incognito detection and to solicit
 feedback on the proposed solution. It has not been approved to ship in Chrome.
 
-TODO: Fill in the whole explainer template below using https://tag.w3.org/explainers/ as a
-reference. Look for [brackets].
-
-## Proponents
-
-- [Proponent team 1]
-- [Proponent team 2]
-- [etc.]
-
 ## Participate
-- https://github.com/explainers-by-googlers/[your-repository-name]/issues
-- [Discussion forum]
-
-## Table of Contents [if the explainer is longer than one printed page]
-
-<!-- Update this table of contents by running `npx doctoc README.md` -->
-<!-- START doctoc generated TOC please keep comment here to allow auto update -->
-<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-
-- [Introduction](#introduction)
-- [Goals](#goals)
-- [Non-goals](#non-goals)
-- [User research](#user-research)
-- [Use cases](#use-cases)
-  - [Use case 1](#use-case-1)
-  - [Use case 2](#use-case-2)
-- [[Potential Solution]](#potential-solution)
-  - [How this solution would solve the use cases](#how-this-solution-would-solve-the-use-cases)
-    - [Use case 1](#use-case-1-1)
-    - [Use case 2](#use-case-2-1)
-- [Detailed design discussion](#detailed-design-discussion)
-  - [[Tricky design choice #1]](#tricky-design-choice-1)
-  - [[Tricky design choice 2]](#tricky-design-choice-2)
-- [Considered alternatives](#considered-alternatives)
-  - [[Alternative 1]](#alternative-1)
-  - [[Alternative 2]](#alternative-2)
-- [Security and Privacy Considerations](#security-and-privacy-considerations)
-- [Stakeholder Feedback / Opposition](#stakeholder-feedback--opposition)
-- [References & acknowledgements](#references--acknowledgements)
-
-<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+- https://github.com/explainers-by-googlers/static-storage-quota/issues
+- [Chromium Bug Tracker](https://issues.chromium.org/issues/464484739)
 
 ## Introduction
 
-[The "executive summary" or "abstract".
-Explain in a few sentences what the goals of the project are,
-and a brief overview of how the solution works.
-This should be no more than 1-2 paragraphs.]
+Websites can often detect if a user is browsing in Incognito mode. A common method involves comparing the output of `navigator.storage.estimate()` with other metrics. Due to different storage limitations (disk-based in Regular vs. RAM-based in Incognito), this API often yields different results between two modes, creating a fingerprintable difference. This proposal aims to enhance the effectiveness of the existing `kStaticStorageQuota` feature flag, which currently does not prevent this Incognito detection method on all devices.
 
 ## Goals
 
-[What is the **end-user need** which this project aims to address? Make this section short, and
-elaborate in the Use cases section.]
+The primary goal is to improve user privacy by reducing the ability of websites to detect the use of Incognito mode through the `navigator.storage.estimate()` API. Currently, the Incognito can be detected with code as simple as this:
+
+```js
+// Example of how a site might try to detect Incognito. According to an internal
+// analysis of Incognito detection methods, most examples boil down to the following:
+async function checkIncognito() {
+    const { quota, usage } = await navigator.storage.estimate();
+    jsHeapStorage = performance.memory.jsHeapSizeLimit;
+    const THRESHOLD = 1.0 // or similar value, varies across detection scripts
+    const isLikelyIncognito = quota < THRESHOLD * jsHeapStorage;
+    if (isLikelyIncognito) {
+      console.log("Incognito mode possibly detected");
+    } else {
+      console.log("Regular mode likely");
+    }
+}
+```
 
 ## Non-goals
 
-[If there are "adjacent" goals which may appear to be in scope but aren't,
-enumerate them here. This section may be fleshed out as your design progresses and you encounter necessary technical and other trade-offs.]
-
-## User research
-
-[If any user research has been conducted to inform your design choices,
-discuss the process and findings. User research should be more common than it is.]
+- Addressing all possible Incognito mode detection vectors.
+- Changing the underlying storage mechanisms of Incognito mode.
+- Modifying other web APIs.
 
 ## Use cases
 
-[Describe in detail what problems end-users are facing, which this project is trying to solve. A
-common mistake in this section is to take a web developer's or server operator's perspective, which
-makes reviewers worry that the proposal will violate [RFC 8890, The Internet is for End
-Users](https://www.rfc-editor.org/rfc/rfc8890).]
+### Use case 1:  Private Browsing without Detection
 
-### Use case 1
+A user wishes to browse the web in Incognito mode to keep their activity private from other users of the same device. They visit various websites, some of which might employ scripts to detect Incognito mode. If detected, the website might restrict access, alter the user experience, or log the user's attempt to browse privately. The user expects Incognito mode to not be easily detectable by the websites they visit.
 
-### Use case 2
-
-<!-- In your initial explainer, you shouldn't be attached or appear attached to any of the potential
-solutions you describe below this. -->
 
 ## [Potential Solution]
 
-[For each related element of the proposed solution - be it an additional JS method, a new object, a new element, a new concept etc., create a section which briefly describes it.]
+The proposed solution modifies the behavior of `navigator.storage.estimate()` only when in Incognito mode AND when the `kStaticStorageQuota` feature flag (`predictable-reported-quota` in `chrome://flags`) is enabled.
 
-```js
-// Provide example code - not IDL - demonstrating the design of the feature.
+In `kStaticStorageQuota release`, in order to reduce a risk of a web breakage, a fix to prevent overestimating the quota was introduced, clipping the bucketed value to fit into available storage size. In case of Incognito, that meant clipping to the available quota (~15% of device's RAM size), effectively not changing the behavior at all. 
 
-// If this API can be used on its own to address a user need,
-// link it back to one of the scenarios in the goals section.
+The change will make Incognito mode, under this flag, always report a static quota of **10GiB + current usage**, mirroring the behavior of Regular mode.
 
-// If you need to show how to get the feature set up
-// (initialized, or using permissions, etc.), include that too.
-```
-
-[Where necessary, provide links to longer explanations of the relevant pre-existing concepts and API.
-If there is no suitable external documentation, you might like to provide supplementary information as an appendix in this document, and provide an internal link where appropriate.]
-
-[If this is already specced, link to the relevant section of the spec.]
-
-[If spec work is in progress, link to the PR or draft of the spec.]
-
-[If you have more potential solutions in mind, add ## Potential Solution 2, 3, etc. sections.]
+This change is implemented under the `kIncognitoStaticStorageQuota` in crrev.com/c/7207198.
 
 ### How this solution would solve the use cases
 
@@ -114,72 +60,44 @@ If there is no suitable external documentation, you might like to provide supple
 
 #### Use case 1
 
-[Description of the end-user scenario]
+By making `navigator.storage.estimate()` return a similar large, static value (10GiB + usage) in both Regular and Incognito modes (when the feature flag is enabled), we remove the discrepancy that websites exploit. This makes it more difficult for scripts to distinguish between the browsing modes based on this API's output, allowing the user to browse privately without being as easily detected. While it is still possible to detect the Incognito mode, that is the most widespread and simple method available.
 
 ```js
-// Sample code demonstrating how to use these APIs to address that scenario.
+async function checkIncognito() {
+    const { quota, usage } = await navigator.storage.estimate();
+    jsHeapStorage = performance.memory.jsHeapSizeLimit;
+    const isLikelyIncognito = quota < THRESHOLD * jsHeapStorage; // not reliable anymore
+    if (isLikelyIncognito) {
+      console.log("Incognito mode possibly detected");
+    } else {
+      console.log("Regular mode likely");
+    }
+}
 ```
-
-#### Use case 2
-
-[etc.]
 
 ## Detailed design discussion
 
-### [Tricky design choice #1]
+### Breakage risk
 
-[Talk through the tradeoffs in coming to the specific design point you want to make.]
-
-```js
-// Illustrated with example code.
-```
-
-[This may be an open question,
-in which case you should link to any active discussion threads.]
-
-### [Tricky design choice 2]
-
-[etc.]
+A risk of web breakage in Incognito mode persists. Websites might attempt to use the full 10GiB of storage, which will not actually be available. However, the `navigator.storage.estimate()` API is supposed to be an *estimate* only, hence Chrome is not strictly obliged to guarantee the reported quota.
 
 ## Considered alternatives
 
-[This should include as many alternatives as you can,
-from high level architectural decisions down to alternative naming choices.]
+### [Alternative 1]: Adjusting RAM-based calculatoin
 
-### [Alternative 1]
+Trying to scale the RAM-based calculation in Incognito to mimic disk space is fraught with complexity and would vary wildly between devices. This approach was deemed less robust than using a fixed static value.
 
-[Describe an alternative which was considered,
-and why you decided against it.]
+### [Alternative 2]: Use encrypted storage for Incognito mode
 
-### [Alternative 2]
-
-[etc.]
+This would require significantly more engineering work than the suggested fix.
 
 ## Security and Privacy Considerations
 
-[Describe any interesting answers you give to the [Security and Privacy Self-Review
-Questionnaire](https://www.w3.org/TR/security-privacy-questionnaire/) and any interesting ways that
-your feature interacts with [Chromium's Web Platform Security
-Guidelines](https://chromium.googlesource.com/chromium/src/+/master/docs/security/web-platform-security-guidelines.md).]
+This feature is designed to enhance user privacy by making Incognito mode detection harder. It does not introduce new security concerns. The main consideration is the potential for site breakage, as discussed in the "Breakage risk" section. This will be monitored during the Finch experiment.
 
 ## Stakeholder Feedback / Opposition
 
-[Implementors and other stakeholders may already have publicly stated positions on this work. If you can, list them here with links to evidence as appropriate.]
+- Internal Teams: The proposal originates from internal analysis of Incognito detection methods.
+- External Stakeholders: Feedback will be gathered during the Finch experiment phase and if the feature proceeds towards public rollout.
 
-- [Implementor A] : Positive
-- [Stakeholder B] : No signals
-- [Implementor C] : Negative
-
-[If appropriate, explain the reasons given by other implementors for their concerns.]
-
-## References & acknowledgements
-
-[Your design will change and be informed by many people; acknowledge them in an ongoing way! It helps build community and, as we only get by through the contributions of many, is only fair.]
-
-[Unless you have a specific reason not to, these should be in alphabetical order.]
-
-Many thanks for valuable feedback and advice from:
-
-- [Person 1]
-- [Person 2]
-- [etc.]
+No significant opposition is known at this stage.
